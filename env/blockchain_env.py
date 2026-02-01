@@ -60,12 +60,6 @@ def _m_req_from_rho(rho: float, p_req: float, m_min: int, m_max: int) -> int:
 
 
 def _m_req_cont_from_rho(rho: float, p_req: float, m_min: int, m_max: int) -> float:
-    """Continuous (fractional) committee requirement.
-
-    Returns a real-valued m_req in [m_min, m_max] by linearly interpolating
-    between the two nearest integers around the target security requirement.
-    This provides smoother shaping for PPO while keeping execution m integer.
-    """
     rho = float(np.clip(float(rho), 0.0, 0.49))
     p_req = float(np.clip(float(p_req), 0.5, 0.999))
     m_min = int(m_min); m_max = int(m_max)
@@ -151,9 +145,6 @@ class BlockchainEnvConfig:
     queue_penalty: float = 0.20     # backlog pressure
     miss_penalty: float = 2.0       # per missed ratio unit
     lambda_gap: float = 0.60
-    # NOTE(v5): Oversized committees were frequently saturating at m_max because
-    # the (m - m_req) regularizer was too weak compared to reward_scale*phi.
-    # We strengthen it so PPO has a learnable trade-off instead of "always max".
     lambda_m_over: float = 10.0
     lambda_m_under_sec: float = 3.0
     lambda_m_under_other: float = 0.25
@@ -219,11 +210,6 @@ class BlockchainEnvConfig:
     # queue risk scanning
     risk_max_scan: int = 2000
 
-    # --- D/E semantics ---
-    # In this project, ConsensusModule.consensus_round() often returns D/E as
-    # normalized *scores* in (0,1] where higher is better (e.g., exp(-latency),
-    # exp(-energy)). If you instead use raw cost semantics (seconds/joules), set
-    # this to False.
     de_is_score: bool = False
 
     # When de_is_score=False, the consensus module returns raw COSTS: D=delay (smaller is better), E=energy (smaller is better).
@@ -246,7 +232,6 @@ class BlockchainEnvConfig:
     reward_transform: str = "none"
     reward_clip: float = 500.0
 
-    # --- v5: shaping for generalization ---
     # Soft deadline: penalize getting close to deadlines even before expiry.
     lambda_soft_deadline: float = 0.8
     soft_deadline_k: float = 0.25  # exp(-k*slack)
@@ -260,10 +245,6 @@ class BlockchainEnvConfig:
     p_secure_req_sec: float = 0.95
     p_secure_req_urg: float = 0.75
     p_secure_req_nor: float = 0.85
-
-    # --- dynamic committee requirement (m_req) ---
-    # Lower bounds; upper bounds are p_secure_req_* above.
-    # These make m_req respond continuously to (alpha,beta,gamma).
     p_secure_req_sec_min: float = 0.80
     p_secure_req_urg_min: float = 0.55
     p_secure_req_nor_min: float = 0.65
@@ -291,8 +272,6 @@ class BlockchainEnvConfig:
     # misc
     seed: int = 0
 
-    # channel names (kept in config for backward compatibility with older code
-    # paths that iterate over cfg.channels)
     channels: tuple = ("SEC", "URG", "NOR")
 
     def __init__(self, **kwargs):
@@ -324,12 +303,6 @@ class BlockchainEnvConfig:
 # ---------------------------
 
 class BlockchainEnv:
-    """
-    3-channel blockchain env with Scheme-B action space.
-
-    Action (continuous, 6 dims in [0,1]):
-      a = (mS, nS, mU, nU, mN, nN)
-    """
 
     CHANNELS = ("SEC", "URG", "NOR")
 
@@ -379,15 +352,6 @@ class BlockchainEnv:
 
 
     def _txpool_stats_all(self, now_round: int) -> Dict[str, Dict[str, float]]:
-        """
-        Unify TxPool.stats() differences across versions.
-
-        - In your current TxPool (txpool.py), stats(now_round=..) returns a dict of all channels:
-            { "SEC": {...}, "URG": {...}, "NOR": {...} }
-        - Some older env versions used stats(ch, now_round=..) returning a single-channel dict.
-
-        This helper always returns ALL-channel stats.
-        """
         try:
             st_all = self.txpool.stats(now_round=int(now_round), slack_quantile=float(getattr(self.cfg, 'slack_quantile', 0.0)))
             if isinstance(st_all, dict) and ("SEC" in st_all or "URG" in st_all or "NOR" in st_all):
@@ -457,9 +421,6 @@ class BlockchainEnv:
                 self._scenario = str(self.rng.choice(['SEC','URG','NOR'], p=p)).upper()
 
 
-        # warmup fills pool so policy sees meaningful state
-        # NOTE: warmup is only for filling; we still keep a sane time order:
-        #   generate -> (round end) drop_expired
         for _ in range(int(self.cfg.warmup_rounds)):
             self.round_id += 1
             self._generate_transactions(now_round=int(self.round_id))
@@ -501,8 +462,6 @@ class BlockchainEnv:
             req_frac["NOR"] /= _s
         else:
             req_frac = {"SEC": 1.0 / 3.0, "URG": 1.0 / 3.0, "NOR": 1.0 / 3.0}
-        # v14: req-focused aggregation weights (one-hot + small other weight),
-        # then sharpen with focus_pow to increase separation.
         w_other = float(np.clip(getattr(self.cfg, 'focus_other_w', 0.05), 0.0, 0.49))
         w_main = float(max(0.0, 1.0 - 2.0 * w_other))
         w_focus = {'SEC': float(w_other), 'URG': float(w_other), 'NOR': float(w_other)}
@@ -514,7 +473,6 @@ class BlockchainEnv:
             if s_tmp > 0.0:
                 w_focus = {ch: float(wf_tmp[ch]) / s_tmp for ch in self.CHANNELS}
 
-        # Demand prior used ONLY for penalty aggregation (NOT for reward mixing)
         w_dem = {'SEC': float(alpha), 'URG': float(beta), 'NOR': float(gamma)}
         s_dem = float(w_dem['SEC'] + w_dem['URG'] + w_dem['NOR'])
         if s_dem > 0.0:
@@ -546,13 +504,6 @@ class BlockchainEnv:
         rho = float(np.clip(self.consensus.sample_dynamic_malicious_ratio(), 0.0, 0.49))
 
         # 4) dynamic m_req: continuous in (alpha,beta,gamma)
-        #    - alpha/beta/gamma come from CURRENT demand vector (SEC/URG/NOR).
-        #    - map each weight to a per-channel security requirement p_req_ch (continuous)
-        #      then convert to continuous committee target m_req_cont via _m_req_cont_from_rho().
-        #    - execution m is still integer, and under v5-C we ONLY hard-clamp SEC by m_req (URG/NOR are soft-penalized), and we DO NOT enforce cross-channel ordering.
-        #         (i) m_SEC >= ceil(m_req_cont_SEC)
-        #        (ii) no enforced m order; we only log order violation
-        #      RL still *chooses* m; environment only applies the SEC hard clamp.
 
         # use local (alpha,beta,gamma) for consistency
         a_eff = float(np.clip(alpha, 0.0, 1.0)) ** float(max(1e-6, self.cfg.p_secure_req_alpha_pow))
@@ -585,22 +536,11 @@ class BlockchainEnv:
         }
         m_req = {k: int(min(self.cfg.m_max, max(self.cfg.m_min, int(math.ceil(v))))) for k, v in m_req_cont.items()}
 
-        # --- v5-C: relax structural constraints, keep only SEC hard m-under ---
-
-        # 1) Do NOT enforce p_req ordering; keep p_req as-is (clipped).
-
-        # 2) Execution m: keep per-channel policy output; only SEC is hard-clamped by m_req.
-
-        # 3) n_used: allocate global n budget fairly (proportional rounding), not URG->NOR->SEC.
 
 
         # p_req order violation (for logging only)
 
         p_order_violation = float(0.0 if (p_req['SEC'] >= p_req['NOR'] >= p_req['URG']) else 1.0)
-
-        # NOTE(v5-C): m_req_cont is derived from (rho, p_req) above; we do NOT override it again with an extra 'pressure' mapping here.
-
-        # executed m (only SEC hard lower bound; URG/NOR are soft-penalized later if under)
 
         mS = int(np.clip(int(m_map_raw['SEC']), self.cfg.m_min, self.cfg.m_max))
 
@@ -610,8 +550,6 @@ class BlockchainEnv:
 
         mS = int(max(mS, int(m_req['SEC'])))  # SEC hard clamp
 
-        # ordering as constraint (projection): keep SEC highest, NOR middle, URG lowest.
-        # This avoids a strong "ordering penalty" that tends to push all m upward.
         if bool(getattr(self.cfg, 'order_as_constraint', True)):
             mm = int(getattr(self.cfg, 'm_order_margin', 0))
             # Enforce: m_SEC >= m_NOR + mm >= m_URG + 2mm.
@@ -1432,19 +1370,6 @@ class BlockchainEnv:
             # EMA smooth (prevents thr from jumping too wildly)
             self._thr_priv = float((1.0 - self._ema_thr) * self._thr_priv + self._ema_thr * thr_priv)
             self._thr_urg = float((1.0 - self._ema_thr) * self._thr_urg + self._ema_thr * thr_urg)
-
-            # IMPORTANT:
-            #   Your current PhysioNet stream may output a degenerate channel label distribution
-            #   (e.g., always "NOR"), which makes req always NOR and prevents RL from learning
-            #   meaningful 3-channel allocation.
-            #
-            #   To guarantee correct coupling with TxPool (3 channels) WITHOUT changing any
-            #   external interfaces, we (re)classify each tx by its privacy/urgency against
-            #   per-batch quantile thresholds (EMA-smoothed).
-            #
-            #   If cfg.override_channel=True, we still respect d.channel, BUT we will upgrade
-            #   a "NOR" label to "SEC"/"URG" when the feature-based classifier strongly
-            #   indicates it, so high-privacy / high-urgency txs don't get stuck in NOR.
 
             def _classify_by_feat(priv: float, urg: float) -> str:
                 if float(priv) >= float(self._thr_priv):
