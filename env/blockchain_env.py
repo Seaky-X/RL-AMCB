@@ -1,17 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-env/blockchain_env.py  (Scheme B)
-
-✅ Scheme B: one action outputs (m_SEC, n_SEC, m_URG, n_URG, m_NOR, n_NOR) every step.
-This makes "different channels dynamically configured" literally true.
-
-This file is designed to be compatible with:
-  - env/txpool.py  (TxPool, TxPoolConfig, Tx)
-  - env/consensus.py (ConsensusModule.consensus_round signature)
-  - env/physionet2012.py (PhysioNet2012Stream.sample_batch)
-
-No extra third‑party libs beyond numpy.
-"""
 
 from __future__ import annotations
 
@@ -487,22 +474,6 @@ class BlockchainEnv:
         return s, mask
 
     def step(self, action: Any) -> Tuple[np.ndarray, np.ndarray, float, bool, Dict[str, Any]]:
-        """One environment step == one *round* decision.
-
-        ✅ Correct time order for "流水并行" (URG→NOR→SEC):
-          (A) use CURRENT pool + action to decide blocks for URG/NOR/SEC
-          (B) compute three block delays (D_urg, D_nor, D_sec) and confirmation times
-              T_urg = D_urg,
-              T_nor = D_urg + D_nor,
-              T_sec = D_urg + D_nor + D_sec
-          (C) round end: drop_expired() on the *remaining* txs (miss penalty is based on this)
-          (D) advance to next round and generate new txs for next state
-
-        This fixes the classic mismatch bug:
-          action is based on previous state, but env was generating new txs before applying action.
-        """
-
-        self.step_id += 1
 
         # 0) snapshot current round and pool state (decision is based on CURRENT pool)
         now_round = int(self.round_id)
@@ -1581,18 +1552,6 @@ class BlockchainEnv:
                         pass
 
     def _compute_demand_vector(self) -> Tuple[float, float, float, str, Dict[str, Any]]:
-        """
-        Demand vector is a *channel demand* (not objective weights):
-          alpha = demand of SEC channel
-          beta  = demand of URG channel
-          gamma = demand of NOR channel
-        req = argmax(alpha,beta,gamma)
-
-        ✅ Key design:
-          - SEC uses threshold-triggered privacy activation (ReLU above thr_priv)
-          - SEC also gets slack term (no longer disadvantaged)
-          - URG slack uses quantile (optional) to avoid URG always dominating
-        """
         # queue shares
         q_sec = float(self.txpool.q_len("SEC"))
         q_urg = float(self.txpool.q_len("URG"))
