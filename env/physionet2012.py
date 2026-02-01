@@ -3,13 +3,6 @@
 env/physionet2012.py
 
 PhysioNet 2012 ICU (set-a / set-b) streaming loader.
-
-Key fix:
-- Channel assignment MUST NOT use a too-high fixed threshold (otherwise URG becomes empty).
-- We assign channel per-batch using quantiles (q_priv / q_urg).
-- Threshold is capped to (max - eps) if the whole batch is low-valued, avoiding empty SEC/URG.
-
-No extra libs beyond numpy.
 """
 from __future__ import annotations
 
