@@ -1,11 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-Ed25519-签名型 VRF（工程可运行、可验证、不可预测的近似 VRF）
-- Prove:  pi = Sign_sk(alpha),  y = H(pi)
-- Verify: Verify_pk(alpha, pi) -> y = H(pi)
-
-建议安装 cryptography 以满足论文中“可验证”的要求。
-"""
 from __future__ import annotations
 import hashlib
 import os
