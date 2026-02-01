@@ -1,10 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-rl/train_rl_ppo.py  (Scheme B)
-
-Train PPO on BlockchainEnv Scheme-B (continuous 6-dim action):
-  a = (m_SEC, n_SEC, m_URG, n_URG, m_NOR, n_NOR) in [0,1]^6
-
+rl/train_rl_ppo.py 
 Run:
   python rl/train_rl_ppo.py --no_load
 
