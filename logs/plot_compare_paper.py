@@ -2,23 +2,6 @@
 # -*- coding: utf-8 -*-
 """
 logs/plot_compare_paper.py
-
-Compare *methods* (Ours vs baselines) using the same metrics CSV schema.
-
-Usage (from project root):
-  python logs/plot_compare_paper.py \
-    --runs "Ours:logs/train_metrics.csv" \
-           "Fixed(0.6,0.3,0.1):logs/baseline_fixedpref_fixed_631_seed0.csv" \
-           "Fixed(0.3,0.3,0.3):logs/baseline_fixedpref_fixed_333_seed0.csv" \
-           "Fixed(0.1,0.6,0.4):logs/baseline_fixedpref_fixed_164_seed0.csv" \
-    --out_dir logs/figs_cmp --column 1 --fmt pdf
-
-Paper style:
-- no titles
-- ticks inward
-- dashed grid on both axes
-- fixed palette: #ffbe7a #3480b8 #9bbf8a #c2bdde #c82423
-- single-column default size (3.35in wide). Adjust with --fig_w/--fig_h.
 """
 from __future__ import annotations
 
