@@ -1,17 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 env/consensus.py
-
-Dynamic BFT-style consensus simulator with:
-- committee size m (selected by RL)
-- block size n_used (selected by RL)
-- VRF-based leader election
-- dynamic malicious ratio per round (can be passed from env for consistency)
-
-Compatible with env/vrf.py in this project:
-- VRFKeypair.generate() takes NO args
-- vrf_prove(sk, alpha) -> (y, pi)
-- vrf_verify(pk, alpha, pi) -> (ok, y)
 """
 from __future__ import annotations
 
@@ -43,13 +32,6 @@ def _binom_tail_prob(m: int, p: float, k_min: int) -> float:
 
 
 class ConsensusModule:
-    """
-    动态 BFT 共识模块：
-    - total_nodes: 节点总数
-    - base_malicious_ratio: 平均恶意比例（每轮可扰动或由 env 显式传入）
-    - offline_prob: 节点离线概率（采样 active 节点）
-    """
-
     def __init__(self,
                  total_nodes: int = 50,
                  base_malicious_ratio: float = 0.20,
@@ -62,9 +44,7 @@ class ConsensusModule:
 
         self.nodes: List[Node] = []
         for i in range(self.total_nodes):
-            # ✅ IMPORTANT: VRFKeypair.generate() has NO args in your vrf.py
-            kp = VRFKeypair.generate()
-            self.nodes.append(Node(
+                self.nodes.append(Node(
                 node_id=int(i),
                 keypair=kp,
                 is_malicious=False,
@@ -127,10 +107,6 @@ class ConsensusModule:
                         base_net_lat: float,
                         round_id: int = 0,
                         malicious_ratio: Optional[float] = None) -> Dict[str, float]:
-        """
-        ✅关键：malicious_ratio 允许 env 显式传入，保证 state 的 rho 和共识用的 rho 一致。
-        返回字段包含 S/D/E + t_cons/e_cons + leader 信息（兼容旧key）。
-        """
         m = int(max(4, m))
         n = int(max(0, n))
 
@@ -141,7 +117,6 @@ class ConsensusModule:
         m_eff = int(min(m, len(active)))
         m_eff = int(max(4, m_eff))
 
-        # ✅ PATCH: accept env passed rho
         if malicious_ratio is None:
             malicious_ratio = self.sample_dynamic_malicious_ratio()
         malicious_ratio = float(np.clip(malicious_ratio, 0.0, 0.49))
