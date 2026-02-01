@@ -1,14 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-rl/ppo.py  (Scheme B)
-
-Masked PPO simplified to *pure continuous* 6-dim actions in [0,1] using Beta distribution.
-
-Action:
-  a = (mS, nS, mU, nU, mN, nN)  each in [0,1]
-Env decodes them to integer m/n ranges.
-
-No extra third-party libs beyond torch + numpy.
+rl/ppo.py 
 """
 
 from __future__ import annotations
